@@ -10,7 +10,7 @@ edition = "2021"
 anyhow = { version = "1", features = ["backtrace"] }
 byteorder = "1.4.3"
 clap = { version = "4.4.2", features = ["derive"] }
-cudarc = { version = "0.9.14", features = ["f16"] }
+cudarc = { version = "0.9.14", features = ["f16", "nccl"] }
 # # TODO: Switch back to the official gemm implementation once it has caught up.
 gemm = { version = "0.15.6", package = "candle-gemm" }
 hf-hub = "0.3.0"
