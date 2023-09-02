@@ -3,7 +3,6 @@ use candle::{CpuStorage, CustomOp1, DType, Device, IndexOp, Layout, Result, Shap
 use candle_nn::{Embedding, Linear, Module, RmsNorm};
 use mpi::topology::SystemCommunicator;
 use mpi::traits::{Communicator, CommunicatorCollectives};
-use cudarc::nccl::safe::ReduceOp;
 use half::f16;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -67,7 +66,7 @@ impl CustomOp1 for AllReduce {
         //     Some((o1, o2)) => s.slice(o1..o2),
         // };
         let mut dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
-        self.comm.as_ref().all_reduce_into(s, &mut dst, &mpi::collective::SystemOperation::sum());
+        self.comm.all_reduce_into(s, &mut dst, &mpi::collective::SystemOperation::sum());
         let dst = candle::CudaStorage::wrap_cuda_slice(dst, dev);
         Ok((dst, l.shape().clone()))
     }

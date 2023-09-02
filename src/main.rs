@@ -132,7 +132,7 @@ fn main() -> Result<()> {
     use tokenizers::Tokenizer;
     let universe = mpi::initialize().unwrap();
     let world = universe.world();
-    let rank = world.rank();
+    // let rank = world.rank();
 
     let args = Args::parse();
 
@@ -206,7 +206,7 @@ fn main() -> Result<()> {
         let id: Id = Id::uninit(internal);
         id
     };
-    let device = CudaDevice::new(i)?;
+    // let device = CudaDevice::new(i)?;
     let comm = Rc::new(world);
     if rank == 0 {
         std::fs::remove_file("nccl_id.txt")?;
