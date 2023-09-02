@@ -116,7 +116,6 @@ struct Args {
     dtype: Option<String>,
 }
 
-
 pub fn device(cpu: bool) -> Result<Device> {
     if cpu {
         Ok(Device::Cpu)
@@ -134,7 +133,7 @@ fn main() -> Result<()> {
     let universe = mpi::initialize().unwrap();
     let world = universe.world();
     let rank = world.rank();
-    
+
     let args = Args::parse();
 
     let dtype = match args.dtype.as_deref() {
