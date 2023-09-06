@@ -66,7 +66,9 @@ impl CustomOp1 for AllReduce {
         //     Some((o1, o2)) => s.slice(o1..o2),
         // };
         let mut dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
-        self.comm.all_reduce_into(s, &mut dst, &mpi::collective::SystemOperation::sum());
+        // self.comm.all_reduce_into(s, &mut dst, &mpi::collective::SystemOperation::sum());
+        let mut h = 0;
+        self.comm.all_reduce_into(&0, &mut h, &mpi::collective::SystemOperation::sum());
         let dst = candle::CudaStorage::wrap_cuda_slice(dst, dev);
         Ok((dst, l.shape().clone()))
     }
@@ -304,7 +306,7 @@ impl CausalSelfAttention {
         let k = self.repeat_kv(k)?;
         let v = self.repeat_kv(v)?;
 
-        let y = if false {
+        let y = if true {
             // flash-attn expects (b_sz, seq_len, nheads, head_dim)
             let q = q.transpose(1, 2)?;
             let k = k.transpose(1, 2)?;

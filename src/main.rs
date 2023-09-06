@@ -242,16 +242,28 @@ fn main() -> Result<()> {
     let mut new_tokens = vec![];
     let start_gen = std::time::Instant::now();
     let mut index_pos = 0;
+    println!("Smaple len: {}", args.sample_len);
+
     for index in 0..args.sample_len {
         let start_gen = std::time::Instant::now();
+        println!("start_gen: {:?}", start_gen);
         let context_size = if index > 0 { 1 } else { tokens.len() };
+        println!("context_size: {:?}", context_size);
         let ctxt = &tokens[tokens.len().saturating_sub(context_size)..];
+        println!("ctxt: {:?}", ctxt); 
         let input = Tensor::new(ctxt, &device)?.unsqueeze(0)?;
+        println!("input: {:?}", input);  
         let logits = llama.forward(&input, index_pos)?;
+        println!("logits: {:?}", logits); 
         let logits = logits.squeeze(0)?;
+        println!("logits: {:?}", logits); 
         index_pos += ctxt.len();
 
+        println!("index_pos: {}", index_pos);
+
         let next_token = logits_processor.sample(&logits)?;
+
+        println!("next_token: {}", next_token); 
         tokens.push(next_token);
         new_tokens.push(next_token);
         if rank == 0 {
