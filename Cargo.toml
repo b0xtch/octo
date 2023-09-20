@@ -41,11 +41,11 @@ parquet = { version = "45.0.0" }
 mpi = { version = "0.6", features = ["user-operations", "derive"] }
 
 # candle
-candle = { git = "https://github.com/huggingface/candle.git", version = "0.2.1", package = "candle-core" }
-candle-datasets = { git = "https://github.com/huggingface/candle.git", version = "0.2.1" }
-candle-nn = { git = "https://github.com/huggingface/candle.git", version = "0.2.1" }
-candle-transformers = { git = "https://github.com/huggingface/candle.git", version = "0.2.1" }
-candle-flash-attn = { git = "https://github.com/huggingface/candle.git", version = "0.2.1", optional = true }
+candle = { git = "https://github.com/huggingface/candle.git", version = "0.2.3", package = "candle-core" }
+candle-datasets = { git = "https://github.com/huggingface/candle.git", version = "0.2.3" }
+candle-nn = { git = "https://github.com/huggingface/candle.git", version = "0.2.3" }
+candle-transformers = { git = "https://github.com/huggingface/candle.git", version = "0.2.3" }
+candle-flash-attn = { git = "https://github.com/huggingface/candle.git", version = "0.2.3", optional = true }
 
 [features]
 default = []
