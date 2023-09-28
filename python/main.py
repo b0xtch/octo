@@ -7,11 +7,7 @@ from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM
 from transformers import BloomConfig, BloomForCausalLM
 from transformers import LlamaForCausalLM, LlamaTokenizer, LlamaConfig
 
-
-
-#  model_name = 'bigscience/bloomz-7b1-mt'
-model_name = 'decapoda-research/llama-7b-hf'
-
+model_name = 'NousResearch/Llama-2-7b-hf'
 
 world_size = int(os.getenv('WORLD_SIZE', '1'))
 local_rank = int(os.getenv('LOCAL_RANK', '0'))
@@ -35,9 +31,8 @@ model = deepspeed.init_inference(model, config=infer_config)
 model.eval()
 
 
-prompt = '''Summarize this for a second-grade student:
-
-Jupiter is the fifth planet from the Sun and the largest in the Solar System. It is a gas giant with a mass one-thousandth that of the Sun, but two-and-a-half times that of all the other planets in the Solar System combined. Jupiter is one of the brightest objects visible to the naked eye in the night sky, and has been known to ancient civilizations since before recorded history. It is named after the Roman god Jupiter.[19] When viewed from Earth, Jupiter can be bright enough for its reflected light to cast visible shadows,[20] and is on average the third-brightest natural object in the night sky after the Moon and Venus.'''
+prompt = '''Explain the concept of cylindricity to a second-grade student:
+'''
 
 for _ in range(50):
     inputs = tokenizer(prompt, return_tensors="pt").to('cuda')
