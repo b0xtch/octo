@@ -1,2 +1,2 @@
-master slots=2
-worker1 slots=2
+master slots=1
+worker1 slots=1

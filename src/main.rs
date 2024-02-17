@@ -9,15 +9,14 @@
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
-use anyhow::{bail, Error, Result};
+use anyhow::{bail, Error as E, Result};
 use clap::Parser;
 
 use candle::{DType, Device, Tensor};
 use candle_transformers::generation::LogitsProcessor;
 use cudarc::driver::safe::CudaDevice;
-use cudarc::nccl::safe::Id;
+use cudarc::nccl::safe::{Comm, Id};
 use hf_hub::{api::sync::Api, Repo, RepoType};
-use mpi::traits::Communicator;
 use std::io::Write;
 use std::rc::Rc;
 
@@ -120,23 +119,8 @@ struct Args {
     dtype: Option<String>,
 }
 
-pub fn device(cpu: bool) -> Result<Device> {
-    if cpu {
-        Ok(Device::Cpu)
-    } else {
-        let device = Device::cuda_if_available(0)?;
-        if !device.is_cuda() {
-            println!("Running on CPU, to run on GPU, build this example with `--features cuda`");
-        }
-        Ok(device)
-    }
-}
-
 fn main() -> Result<()> {
     use tokenizers::Tokenizer;
-    let universe = mpi::initialize().unwrap();
-    let world = universe.world();
-    // let rank = world.rank();
 
     let args = Args::parse();
 
@@ -159,14 +143,7 @@ fn main() -> Result<()> {
     let config_filename = api.get("config.json")?;
     let config: Config = serde_json::from_slice(&std::fs::read(config_filename)?)?;
     let tokenizer_filename = api.get("tokenizer.json")?;
-    let mut filenames = vec![];
-    for rfilename in [
-        "model-00001-of-00002.safetensors",
-        "model-00002-of-00002.safetensors",
-    ] {
-        let filename = api.get(rfilename)?;
-        filenames.push(filename);
-    }
+    let filenames = candle_examples::hub_load_safetensors(&api, "model.safetensors.index.json")?;
 
     if args.rank.is_none() {
         let children: Vec<_> = (0..args.num_shards)
@@ -210,8 +187,8 @@ fn main() -> Result<()> {
         let id: Id = Id::uninit(internal);
         id
     };
-    // let device = CudaDevice::new(i)?;
-    let comm = Rc::new(world);
+    let device = CudaDevice::new(i)?;
+    let comm = Rc::new(Comm::from_rank(device, i, num_shards, id).unwrap());
     if rank == 0 {
         std::fs::remove_file("nccl_id.txt")?;
     }
@@ -221,23 +198,16 @@ fn main() -> Result<()> {
     let cache = model::Cache::new(dtype, &config, &device)?;
 
     println!("building the model");
-    let handles = filenames
-        .iter()
-        .map(|f| Ok(unsafe { candle::safetensors::MmapedFile::new(f.as_path())? }))
-        .collect::<Result<Vec<_>>>()?;
-    let tensors: Vec<_> = handles
-        .iter()
-        .map(|h| Ok(h.deserialize()?))
-        .collect::<Result<Vec<_>>>()?;
-
-    let vb = candle_nn::var_builder::ShardedSafeTensors::var_builder(tensors, dtype, &device);
+    let vb = unsafe {
+        candle_nn::var_builder::ShardedSafeTensors::var_builder(&filenames, dtype, &device)?
+    };
     let llama = Llama::load(vb, &cache, &config, comm)?;
-    let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(Error::msg)?;
+    let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(E::msg)?;
 
     let prompt = args.prompt.as_ref().map_or(DEFAULT_PROMPT, |p| p.as_str());
     let mut tokens = tokenizer
         .encode(prompt, true)
-        .map_err(Error::msg)?
+        .map_err(E::msg)?
         .get_ids()
         .to_vec();
 
@@ -246,28 +216,16 @@ fn main() -> Result<()> {
     let mut new_tokens = vec![];
     let start_gen = std::time::Instant::now();
     let mut index_pos = 0;
-    println!("Smaple len: {}", args.sample_len);
-
     for index in 0..args.sample_len {
         let start_gen = std::time::Instant::now();
-        println!("start_gen: {:?}", start_gen);
         let context_size = if index > 0 { 1 } else { tokens.len() };
-        println!("context_size: {:?}", context_size);
         let ctxt = &tokens[tokens.len().saturating_sub(context_size)..];
-        println!("ctxt: {:?}", ctxt); 
         let input = Tensor::new(ctxt, &device)?.unsqueeze(0)?;
-        println!("input: {:?}", input);  
         let logits = llama.forward(&input, index_pos)?;
-        println!("logits: {:?}", logits); 
         let logits = logits.squeeze(0)?;
-        println!("logits: {:?}", logits); 
         index_pos += ctxt.len();
 
-        println!("index_pos: {}", index_pos);
-
         let next_token = logits_processor.sample(&logits)?;
-
-        println!("next_token: {}", next_token); 
         tokens.push(next_token);
         new_tokens.push(next_token);
         if rank == 0 {
@@ -276,7 +234,7 @@ fn main() -> Result<()> {
                 "{} token: {} '{}'",
                 index + 1,
                 next_token,
-                tokenizer.decode(&[next_token], true).map_err(Error::msg)?
+                tokenizer.decode(&[next_token], true).map_err(E::msg)?
             );
         }
     }
@@ -288,9 +246,8 @@ fn main() -> Result<()> {
             args.sample_len as f64 / dt.as_secs_f64(),
             tokenizer
                 .decode(new_tokens.as_slice(), true)
-                .map_err(Error::msg)?
+                .map_err(E::msg)?
         );
     }
-
     Ok(())
 }

@@ -1,15 +1,13 @@
 use candle::backend::BackendStorage;
 use candle::{CpuStorage, CustomOp1, DType, Device, IndexOp, Layout, Result, Shape, Tensor, D};
 use candle_nn::{Embedding, Linear, Module, RmsNorm};
-use mpi::topology::SystemCommunicator;
-use mpi::traits::{Communicator, CommunicatorCollectives};
+use cudarc::nccl::safe::{Comm, ReduceOp};
 use half::f16;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-const MAX_SEQ_LEN: usize = 4096;
+use super::MAX_SEQ_LEN;
 
 use candle_nn::var_builder::ShardedVarBuilder as VarBuilder;
 
@@ -28,11 +26,11 @@ impl TensorParallelColumnLinear {
 
 struct TensorParallelRowLinear {
     linear: Linear,
-    comm: Rc<SystemCommunicator>,
+    comm: Rc<Comm>,
 }
 
 struct AllReduce {
-    comm: Rc<SystemCommunicator>,
+    comm: Rc<Comm>,
 }
 
 /// This is actually not safe: https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/threadsafety.html
@@ -51,7 +49,7 @@ impl CustomOp1 for AllReduce {
         todo!("implement allreduce for cpu is not necessary for single node");
     }
 
-    // #[cfg(feature = "cuda")]
+    #[cfg(feature = "cuda")]
     fn cuda_fwd(
         &self,
         s: &candle::CudaStorage,
@@ -66,20 +64,18 @@ impl CustomOp1 for AllReduce {
         //     Some((o1, o2)) => s.slice(o1..o2),
         // };
         let mut dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
-        // self.comm.all_reduce_into(s, &mut dst, &mpi::collective::SystemOperation::sum());
-        let mut h = 0;
-        self.comm.all_reduce_into(&0, &mut h, &mpi::collective::SystemOperation::sum());
+        self.comm.all_reduce(s, &mut dst, &ReduceOp::Sum).unwrap();
         let dst = candle::CudaStorage::wrap_cuda_slice(dst, dev);
         Ok((dst, l.shape().clone()))
     }
 }
 
-fn all_reduce_sum(x: &Tensor, comm: &Rc<SystemCommunicator>) -> Result<Tensor> {
+fn all_reduce_sum(x: &Tensor, comm: &Rc<Comm>) -> Result<Tensor> {
     x.apply_op1(AllReduce { comm: comm.clone() })
 }
 
 impl TensorParallelRowLinear {
-    fn new(linear: Linear, comm: Rc<SystemCommunicator>) -> Self {
+    fn new(linear: Linear, comm: Rc<Comm>) -> Self {
         Self { linear, comm }
     }
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
@@ -97,22 +93,19 @@ fn shard(dim: usize, rank: usize, world_size: usize) -> candle_nn::var_builder::
 }
 
 impl TensorParallelColumnLinear {
-    fn load(vb: VarBuilder, comm: Rc<SystemCommunicator>) -> Result<Self> {
+    fn load(vb: VarBuilder, comm: Rc<Comm>) -> Result<Self> {
         let rank = comm.rank();
-        let size = comm.size();
-        let weight = vb.get_with_hints((), "weight", shard(0, rank as usize, size as usize))?;
+        let size = comm.world_size();
+        let weight = vb.get_with_hints((), "weight", shard(0, rank, size))?;
         Ok(Self::new(Linear::new(weight, None)))
     }
 
-    fn load_multi(vb: VarBuilder, prefixes: &[&str], comm: Rc<SystemCommunicator>) -> Result<Self> {
+    fn load_multi(vb: VarBuilder, prefixes: &[&str], comm: Rc<Comm>) -> Result<Self> {
         let rank = comm.rank();
-        let size = comm.size();
+        let size = comm.world_size();
         let weights: Vec<_> = prefixes
             .iter()
-            .map(|p| {
-                vb.pp(p)
-                    .get_with_hints((), "weight", shard(0, rank as usize, size as usize))
-            })
+            .map(|p| vb.pp(p).get_with_hints((), "weight", shard(0, rank, size)))
             .collect::<Result<Vec<_>>>()?;
         let weight = Tensor::cat(&weights, 0)?;
         Ok(Self::new(Linear::new(weight, None)))
@@ -120,10 +113,10 @@ impl TensorParallelColumnLinear {
 }
 
 impl TensorParallelRowLinear {
-    fn load(vb: VarBuilder, comm: Rc<SystemCommunicator>) -> Result<Self> {
+    fn load(vb: VarBuilder, comm: Rc<Comm>) -> Result<Self> {
         let rank = comm.rank();
-        let size = comm.size();
-        let weight = vb.get_with_hints((), "weight", shard(1, rank as usize, size as usize))?;
+        let size = comm.world_size();
+        let weight = vb.get_with_hints((), "weight", shard(1, rank, size))?;
         Ok(Self::new(Linear::new(weight, None), comm))
     }
 }
@@ -277,7 +270,6 @@ impl CausalSelfAttention {
         let softmax_scale = 1f32 / (self.head_dim as f32).sqrt();
         let y = candle_flash_attn::flash_attn(&q, &k, &v, softmax_scale, seq_len > 1)?
             .transpose(1, 2)?;
-
         // Convert to contiguous as matmul doesn't support strided vs for now.
         let y = y.transpose(1, 2)?.reshape(&[b_sz, seq_len, hidden_size])?;
         let y = self.o_proj.forward(&y)?;
@@ -298,12 +290,7 @@ impl CausalSelfAttention {
         }
     }
 
-    fn load(
-        vb: VarBuilder,
-        cache: &Cache,
-        cfg: &Config,
-        comm: Rc<SystemCommunicator>,
-    ) -> Result<Self> {
+    fn load(vb: VarBuilder, cache: &Cache, cfg: &Config, comm: Rc<Comm>) -> Result<Self> {
         let qkv_proj = TensorParallelColumnLinear::load_multi(
             vb.clone(),
             &["q_proj", "k_proj", "v_proj"],
@@ -313,8 +300,8 @@ impl CausalSelfAttention {
         Ok(Self {
             qkv_proj,
             o_proj,
-            num_attention_heads: cfg.num_attention_heads / comm.size() as usize,
-            num_key_value_heads: cfg.num_key_value_heads / comm.size() as usize,
+            num_attention_heads: cfg.num_attention_heads / comm.world_size(),
+            num_key_value_heads: cfg.num_key_value_heads / comm.world_size(),
             head_dim: cfg.hidden_size / cfg.num_attention_heads,
             cache: cache.clone(),
         })
@@ -345,7 +332,7 @@ impl Mlp {
         self.c_proj.forward(&x)
     }
 
-    fn load(vb: VarBuilder, _cfg: &Config, comm: Rc<SystemCommunicator>) -> Result<Self> {
+    fn load(vb: VarBuilder, _cfg: &Config, comm: Rc<Comm>) -> Result<Self> {
         let c_fc1 = TensorParallelColumnLinear::load(vb.pp("gate_proj"), comm.clone())?;
         let c_fc2 = TensorParallelColumnLinear::load(vb.pp("up_proj"), comm.clone())?;
         let c_proj = TensorParallelRowLinear::load(vb.pp("down_proj"), comm)?;
@@ -384,12 +371,7 @@ impl Block {
         Ok(x)
     }
 
-    fn load(
-        vb: VarBuilder,
-        cache: &Cache,
-        cfg: &Config,
-        comm: Rc<SystemCommunicator>,
-    ) -> Result<Self> {
+    fn load(vb: VarBuilder, cache: &Cache, cfg: &Config, comm: Rc<Comm>) -> Result<Self> {
         let attn = CausalSelfAttention::load(vb.pp("self_attn"), cache, cfg, comm.clone())?;
         let mlp = Mlp::load(vb.pp("mlp"), cfg, comm)?;
         let input_layernorm = rms_norm(cfg.hidden_size, 1e-5, vb.pp("input_layernorm"))?;
@@ -433,12 +415,7 @@ impl Llama {
         logits.to_dtype(DType::F32)
     }
 
-    pub fn load(
-        vb: VarBuilder,
-        cache: &Cache,
-        cfg: &Config,
-        comm: Rc<SystemCommunicator>,
-    ) -> Result<Self> {
+    pub fn load(vb: VarBuilder, cache: &Cache, cfg: &Config, comm: Rc<Comm>) -> Result<Self> {
         let wte = embedding(cfg, vb.pp("model.embed_tokens"))?;
         let lm_head = linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?;
         let norm = rms_norm(cfg.hidden_size, 1e-5, vb.pp("model.norm"))?;

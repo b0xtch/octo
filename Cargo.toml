@@ -20,32 +20,31 @@ imageproc = { version = "0.23.0", default-features = false }
 intel-mkl-src = { version = "0.8.1", features = ["mkl-static-lp64-iomp"], optional = true }
 libc = { version = "0.2.147" }
 log = "0.4"
-memmap2 = "0.7.1"
+memmap2 = { version = "0.9.3", features = ["stable_deref_trait"] }
 num_cpus = "1.15.0"
 num-traits = "0.2.15"
 rand = "0.8.5"
 rand_distr = "0.4.3"
 rayon = "1.7.0"
 rusttype = { version = "0.9", default-features = false }
-safetensors = "0.3.1"
+safetensors = "0.4.1"
 serde = { version = "1.0.171", features = ["derive"] }
 serde_json = "1.0.99"
 thiserror = "1"
-tokenizers = { version = "0.13.4", default-features = false, features = ["onig"] }
+tokenizers = { version = "0.15.0", default-features = false, features = ["onig"] }
 tracing = "0.1.37"
 tracing-chrome = "0.7.1"
 tracing-subscriber = "0.3.7"
 wav = "1.0.0"
 zip = { version = "0.6.6", default-features = false }
 parquet = { version = "45.0.0" }
-mpi = { version = "0.6", features = ["user-operations", "derive"] }
 
 # candle
-candle = { git = "https://github.com/huggingface/candle.git", version = "0.2.3", package = "candle-core" }
-candle-datasets = { git = "https://github.com/huggingface/candle.git", version = "0.2.3" }
-candle-nn = { git = "https://github.com/huggingface/candle.git", version = "0.2.3" }
-candle-transformers = { git = "https://github.com/huggingface/candle.git", version = "0.2.3" }
-candle-flash-attn = { git = "https://github.com/huggingface/candle.git", version = "0.2.3", optional = true }
+candle = { git = "https://github.com/huggingface/candle.git", version = "0.4.0", package = "candle-core" }
+candle-datasets = { git = "https://github.com/huggingface/candle.git", version = "0.4.0" }
+candle-nn = { git = "https://github.com/huggingface/candle.git", version = "0.4.0" }
+candle-transformers = { git = "https://github.com/huggingface/candle.git", version = "0.4.0" }
+candle-flash-attn = { git = "https://github.com/huggingface/candle.git", version = "0.4.0", optional = true }
 
 [features]
 default = []
