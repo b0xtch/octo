@@ -1,12 +1,17 @@
+# `docker build -t b0xtch/candle-poc:latest -f ./Dockerfile .`
+# rebuild: `docker build --pull --no-cache -t b0xtch/candle-poc:latest -f ./Dockerfile .`
+
 ARG UBUNTU_VERSION=22.04
 # This needs to generally match the container host's environment.
 ARG CUDA_VERSION=11.7.1
 # Target the CUDA build image
 ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 # Target the CUDA runtime image
-ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
+ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} 
 
 FROM ${BASE_CUDA_DEV_CONTAINER} as build
+
+RUN echo ${BASE_CUDA_DEV_CONTAINER}
 
 # Rust toolchain version
 ARG RUST_TOOLCHAIN=stable
